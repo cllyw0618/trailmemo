@@ -1,0 +1,4 @@
+backend/
+*.png
+vite-dev.log
+vite-dev.err.log
