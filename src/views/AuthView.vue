@@ -151,9 +151,9 @@ async function submit() {
                 <option value="其他">其他</option>
               </select>
             </label>
-            <label>
+            <label class="birthday-field">
               生日
-              <input v-model="birthday" type="date" />
+              <input v-model="birthday" class="birthday-input" type="date" aria-label="生日" />
             </label>
           </div>
         </template>
@@ -238,10 +238,24 @@ async function submit() {
 
 .inline-fields {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(96px, 0.78fr) minmax(188px, 1.22fr);
   gap: 12px;
 }
 
+
+.birthday-field {
+  min-width: 0;
+}
+
+.auth-form input[type="date"].birthday-input {
+  min-width: 0;
+  padding-right: 10px;
+  font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
 .auth-error {
   margin: 0;
   color: #ef4444;
