@@ -3,11 +3,13 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/authStore'
 import { useTravelerStore } from '../stores/travelerStore'
+import { useMemoryStore } from '../stores/memoryStore'
 import PixelTraveler from '../components/PixelTraveler.vue'
 
 const router = useRouter()
 const auth = useAuthStore()
 const traveler = useTravelerStore()
+const memory = useMemoryStore()
 
 const isLogin = ref(false)
 const username = ref('')
@@ -45,7 +47,9 @@ async function submit() {
   loading.value = true
   try {
     if (isLogin.value) {
-      await auth.login(username.value, password.value)
+      const profile = await auth.login(username.value, password.value)
+      traveler.createTraveler(profile?.travelerGender || 'male', profile?.travelerIdentity || 'forest')
+      await memory.loadUserData()
       router.push('/map')
     } else {
       if (!showTravelerSetup.value) {
@@ -55,8 +59,9 @@ async function submit() {
         return
       }
       // 第二步：注册 + 创建旅人
-      await auth.register(username.value, password.value, gender.value, birthday.value)
+      await auth.register(username.value, password.value, gender.value, birthday.value, travelerGender.value, travelerIdentity.value)
       traveler.createTraveler(travelerGender.value, travelerIdentity.value)
+      await memory.loadUserData()
       router.push('/map')
     }
   } catch (e) {

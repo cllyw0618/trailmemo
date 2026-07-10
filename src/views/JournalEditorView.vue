@@ -114,11 +114,11 @@ function chooseTemplate(template) {
   }
 }
 
-function saveJournal() {
+async function saveJournal() {
   if (!form.title.trim()) {
     form.title = selectedTrail.value?.name || '山野记忆'
   }
-  const isNew = memory.addJournal({ ...form, images: [...form.images] })
+  const isNew = await memory.addJournal({ ...form, images: [...form.images] })
   const trail = selectedTrail.value
   const growth = memory.growthLevel
   const nextGap = Math.max(0, growth.nextTarget - growth.current)

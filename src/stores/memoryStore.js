@@ -1,11 +1,8 @@
 import { defineStore } from 'pinia'
 import { trails } from '../data/trails'
+import { supabase, hasSupabaseConfig } from '../lib/supabase'
+import { useAuthStore } from './authStore'
 
-/**
- * 成长等级规则
- * 0→山野新手  1→初入山野  3→草甸行者  5→峡谷探索者
- * 8→雪山旅人  12→远方收藏家  16+→地球漫游者
- */
 const LEVELS = [
   { min: 0, name: '山野新手' },
   { min: 1, name: '初入山野' },
@@ -16,11 +13,39 @@ const LEVELS = [
   { min: 16, name: '地球漫游者' },
 ]
 
+function toJournal(row) {
+  return {
+    id: row.id,
+    trailId: row.trail_id,
+    title: row.title || '',
+    mood: row.mood || '',
+    weather: row.weather || '',
+    text: row.text || '',
+    images: Array.isArray(row.images) ? row.images : [],
+    template: row.template || 't1',
+    createdAt: row.created_at || new Date().toISOString(),
+  }
+}
+
+function toJournalRow(journal, userId) {
+  return {
+    user_id: userId,
+    trail_id: journal.trailId,
+    title: journal.title || '',
+    mood: journal.mood || '',
+    weather: journal.weather || '',
+    text: journal.text || '',
+    images: journal.images || [],
+    template: journal.template || 't1',
+  }
+}
+
 export const useMemoryStore = defineStore('memory', {
   state: () => ({
     trails,
     journals: [],
     unlockedTrailIds: [],
+    loading: false,
   }),
   getters: {
     unlockedCount: (state) => state.unlockedTrailIds.length,
@@ -29,7 +54,6 @@ export const useMemoryStore = defineStore('memory', {
       .filter((trail) => state.unlockedTrailIds.includes(trail.id))
       .reduce((sum, trail) => sum + trail.distanceKm, 0),
 
-    /** 成长等级：返回当前等级名称、进度、下一级目标 */
     growthLevel: (state) => {
       const count = state.unlockedTrailIds.length
       let currentLevel = LEVELS[0]
@@ -41,7 +65,6 @@ export const useMemoryStore = defineStore('memory', {
           break
         }
       }
-      // 如果当前是最高等级，nextLevel 取自身
       if (!nextLevel) nextLevel = currentLevel
       const current = count
       const nextTarget = nextLevel.min
@@ -57,7 +80,6 @@ export const useMemoryStore = defineStore('memory', {
       }
     },
 
-    /** 按 achievementType 统计已解锁路线数量 */
     achievementTypeStats: (state) => {
       const stats = {}
       state.trails.forEach((t) => {
@@ -68,7 +90,6 @@ export const useMemoryStore = defineStore('memory', {
       return stats
     },
 
-    /** 各章节进度：{ chapterName, unlocked, total } */
     chapterProgress: (state) => {
       const chapterMap = {}
       state.trails.forEach((t) => {
@@ -85,27 +106,77 @@ export const useMemoryStore = defineStore('memory', {
     },
   },
   actions: {
-    unlockTrail(trailId) {
-      if (!this.unlockedTrailIds.includes(trailId)) {
-        this.unlockedTrailIds.push(trailId)
-        return true // 首次解锁
+    async loadUserData() {
+      const auth = useAuthStore()
+      const userId = auth.currentUserId
+      if (!hasSupabaseConfig || !userId) return
+
+      this.loading = true
+      try {
+        const [{ data: unlocked, error: unlockedError }, { data: journals, error: journalsError }] = await Promise.all([
+          supabase.from('unlocked_trails').select('trail_id').eq('user_id', userId),
+          supabase.from('journals').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
+        ])
+        if (unlockedError) throw new Error(unlockedError.message)
+        if (journalsError) throw new Error(journalsError.message)
+        this.unlockedTrailIds = (unlocked || []).map((item) => item.trail_id)
+        this.journals = (journals || []).map(toJournal)
+      } finally {
+        this.loading = false
       }
-      return false // 已解锁过
     },
-    addJournal(journal) {
+
+    async unlockTrail(trailId) {
+      const auth = useAuthStore()
+      const isNew = !this.unlockedTrailIds.includes(trailId)
+      if (isNew) this.unlockedTrailIds.push(trailId)
+
+      if (hasSupabaseConfig && auth.currentUserId) {
+        const { error } = await supabase
+          .from('unlocked_trails')
+          .upsert({ user_id: auth.currentUserId, trail_id: trailId }, { onConflict: 'user_id,trail_id' })
+        if (error) throw new Error(error.message)
+      }
+      return isNew
+    },
+
+    async addJournal(journal) {
+      const auth = useAuthStore()
       const isNewlyUnlocked = !this.unlockedTrailIds.includes(journal.trailId)
-      this.journals.unshift({
+      const localJournal = {
         id: `journal-${Date.now()}`,
         createdAt: new Date().toISOString(),
         images: [],
         template: 't1',
         ...journal,
-      })
-      this.unlockTrail(journal.trailId)
+      }
+      this.journals.unshift(localJournal)
+      await this.unlockTrail(journal.trailId)
+
+      if (hasSupabaseConfig && auth.currentUserId) {
+        const { data, error } = await supabase
+          .from('journals')
+          .insert(toJournalRow(localJournal, auth.currentUserId))
+          .select('*')
+          .single()
+        if (error) throw new Error(error.message)
+        const index = this.journals.findIndex((item) => item.id === localJournal.id)
+        if (index >= 0) this.journals.splice(index, 1, toJournal(data))
+      }
       return isNewlyUnlocked
     },
-    deleteJournal(journalId) {
+
+    async deleteJournal(journalId) {
+      const auth = useAuthStore()
       this.journals = this.journals.filter((journal) => journal.id !== journalId)
+      if (hasSupabaseConfig && auth.currentUserId && !journalId.startsWith('journal-')) {
+        const { error } = await supabase
+          .from('journals')
+          .delete()
+          .eq('id', journalId)
+          .eq('user_id', auth.currentUserId)
+        if (error) throw new Error(error.message)
+      }
     },
   },
 })

@@ -1,7 +1,28 @@
-﻿import { createApp } from 'vue'
+import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router'
 import './styles/global.css'
+import { useAuthStore } from './stores/authStore'
+import { useMemoryStore } from './stores/memoryStore'
+import { useTravelerStore } from './stores/travelerStore'
 
-createApp(App).use(createPinia()).use(router).mount('#app')
+async function bootstrap() {
+  const pinia = createPinia()
+  const app = createApp(App)
+  app.use(pinia).use(router)
+
+  const auth = useAuthStore(pinia)
+  const memory = useMemoryStore(pinia)
+  const traveler = useTravelerStore(pinia)
+
+  await auth.init()
+  if (auth.user) {
+    traveler.createTraveler(auth.user.travelerGender || 'male', auth.user.travelerIdentity || 'forest')
+    await memory.loadUserData()
+  }
+
+  app.mount('#app')
+}
+
+bootstrap()

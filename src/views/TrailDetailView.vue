@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useMemoryStore } from '../stores/memoryStore'
@@ -11,14 +11,14 @@ const trail = computed(() => memory.trails.find((item) => item.id === route.para
 const isUnlocked = computed(() => trail.value ? memory.unlockedTrailIds.includes(trail.value.id) : false)
 const journals = computed(() => memory.journals.filter((journal) => journal.trailId === trail.value?.id))
 
-function unlockTrail() {
+async function unlockTrail() {
   if (!trail.value) return
-  memory.unlockTrail(trail.value.id)
+  await memory.unlockTrail(trail.value.id)
 }
 
-function saveJournal() {
+async function saveJournal() {
   if (!trail.value || !note.value.trim()) return
-  memory.addJournal({
+  await memory.addJournal({
     trailId: trail.value.id,
     title: `${trail.value.name} · 电子手账`,
     mood: '山野记录',

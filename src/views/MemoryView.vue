@@ -62,8 +62,8 @@ function toggleAchievements() {
 }
 function askDelete(journalId) { pendingDeleteId.value = journalId }
 function cancelDelete() { pendingDeleteId.value = '' }
-function confirmDelete(journalId) {
-  memory.deleteJournal(journalId)
+async function confirmDelete(journalId) {
+  await memory.deleteJournal(journalId)
   pendingDeleteId.value = ''
 }
 </script>
