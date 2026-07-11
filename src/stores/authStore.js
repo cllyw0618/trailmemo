@@ -105,7 +105,11 @@ export const useAuthStore = defineStore('auth', () => {
       .from('characters')
       .upsert(payload, { onConflict: 'user_id' })
 
-    if (error && !isMissingTableError(error)) throw new Error('像素角色初始化失败，请稍后再试')
+    if (error) {
+      // 表不存在或其他错误，静默跳过，不阻断登录
+      console.warn('characters 表写入跳过:', error.message)
+      return null
+    }
     return payload
   }
 
