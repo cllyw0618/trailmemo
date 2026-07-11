@@ -2,28 +2,35 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { supabase, hasSupabaseConfig } from '../lib/supabase'
 
-function hashUsername(username) {
-  let hash = 5381
-  for (const char of username.trim()) {
-    hash = ((hash << 5) + hash) + char.codePointAt(0)
-    hash = hash >>> 0
-  }
-  return hash.toString(36)
+function makeDefaultName() {
+  return `山野旅人${Math.floor(100 + Math.random() * 900)}`
 }
 
-function usernameToEmail(username) {
-  return `trailmemo-${hashUsername(username)}@example.com`.replace(/\s/g, '').trim()
+function cleanText(value) {
+  return String(value || '').trim()
+}
+
+function buildProfileDraft(options = {}) {
+  return {
+    username: cleanText(options.username) || makeDefaultName(),
+    gender: cleanText(options.gender),
+    birthday: cleanText(options.birthday),
+    traveler_gender: options.travelerGender || options.traveler_gender || 'male',
+    traveler_identity: options.travelerIdentity || options.traveler_identity || 'forest',
+    updated_at: new Date().toISOString(),
+  }
 }
 
 function normalizeProfile(profile, authUser) {
   if (!profile && !authUser) return null
   return {
     id: profile?.id || authUser?.id,
-    username: profile?.username || authUser?.user_metadata?.username || '',
+    username: profile?.username || authUser?.user_metadata?.username || makeDefaultName(),
     gender: profile?.gender || '',
     birthday: profile?.birthday || '',
     travelerGender: profile?.traveler_gender || 'male',
     travelerIdentity: profile?.traveler_identity || 'forest',
+    isAnonymous: authUser?.is_anonymous ?? true,
   }
 }
 
@@ -34,14 +41,47 @@ export const useAuthStore = defineStore('auth', () => {
   const isLoggedIn = computed(() => user.value !== null)
   const currentUserId = computed(() => user.value?.id || '')
 
+  async function saveProfile(authUser, options = {}) {
+    if (!authUser) throw new Error('匿名旅人创建失败，请稍后再试')
+
+    const profilePayload = {
+      id: authUser.id,
+      ...buildProfileDraft(options),
+    }
+
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .upsert(profilePayload, { onConflict: 'id' })
+      .select('*')
+      .single()
+
+    if (error) {
+      throw new Error('旅人资料保存失败。请确认 Supabase 已运行建表 SQL，并开启匿名登录。')
+    }
+
+    user.value = normalizeProfile(profile, authUser)
+    return user.value
+  }
+
   async function loadProfile(authUser) {
     if (!hasSupabaseConfig || !authUser) return null
+
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', authUser.id)
       .maybeSingle()
+
     if (error) throw new Error(error.message)
+
+    if (!data) {
+      return saveProfile(authUser, {
+        username: authUser.user_metadata?.username || makeDefaultName(),
+        travelerGender: 'male',
+        travelerIdentity: 'forest',
+      })
+    }
+
     user.value = normalizeProfile(data, authUser)
     return user.value
   }
@@ -51,72 +91,52 @@ export const useAuthStore = defineStore('auth', () => {
       ready.value = true
       return null
     }
+
     const { data, error } = await supabase.auth.getUser()
     if (!error && data?.user) {
       await loadProfile(data.user)
     }
+
     ready.value = true
     return user.value
   }
 
-  async function register(username, password, gender, birthday, travelerGender = 'male', travelerIdentity = 'forest') {
-    if (!username?.trim() || !password) throw new Error('用户名和密码不能为空')
-    if (username.trim().length < 2 || username.trim().length > 20) throw new Error('用户名长度需在 2-20 个字符之间')
-    if (password.length < 6) throw new Error('密码长度至少 6 个字符')
+  async function startAnonymousJourney(options = {}) {
+    const profileDraft = buildProfileDraft(options)
+
     if (!hasSupabaseConfig) {
-      user.value = { id: `local-${Date.now()}`, username, gender, birthday, travelerGender, travelerIdentity }
+      user.value = {
+        id: `local-${Date.now()}`,
+        username: profileDraft.username,
+        gender: profileDraft.gender,
+        birthday: profileDraft.birthday,
+        travelerGender: profileDraft.traveler_gender,
+        travelerIdentity: profileDraft.traveler_identity,
+        isAnonymous: true,
+      }
       return user.value
     }
 
-    const email = usernameToEmail(username)
-    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { username: username.trim() } },
-    })
-    if (signUpError) {
-      if (signUpError.message?.toLowerCase().includes('already')) throw new Error('用户名已存在，请换一个')
-      throw new Error(signUpError.message || '注册失败')
-    }
-    if (!signUpData?.user) throw new Error('注册失败，请稍后再试')
+    const { data: currentSession } = await supabase.auth.getUser()
+    let authUser = currentSession?.user || null
 
-    const profilePayload = {
-      id: signUpData.user.id,
-      username: username.trim(),
-      gender: gender || '',
-      birthday: birthday || '',
-      traveler_gender: travelerGender,
-      traveler_identity: travelerIdentity,
-      updated_at: new Date().toISOString(),
+    if (!authUser) {
+      const { data, error } = await supabase.auth.signInAnonymously()
+      if (error) {
+        throw new Error('匿名登录失败。请在 Supabase Authentication 里开启 Anonymous sign-ins。')
+      }
+      authUser = data?.user
     }
 
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .upsert(profilePayload, { onConflict: 'id' })
-      .select('*')
-      .single()
-
-    if (profileError) {
-      throw new Error('资料保存失败。请确认 Supabase 已运行建表 SQL，并关闭邮箱确认。')
-    }
-
-    user.value = normalizeProfile(profile, signUpData.user)
-    return user.value
+    return saveProfile(authUser, profileDraft)
   }
 
-  async function login(username, password) {
-    if (!username?.trim() || !password) throw new Error('用户名和密码不能为空')
-    if (!hasSupabaseConfig) {
-      user.value = { id: 'local-user', username: username.trim(), gender: '', birthday: '', travelerGender: 'male', travelerIdentity: 'forest' }
-      return user.value
-    }
+  async function register(username, _password, gender, birthday, travelerGender = 'male', travelerIdentity = 'forest') {
+    return startAnonymousJourney({ username, gender, birthday, travelerGender, travelerIdentity })
+  }
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: usernameToEmail(username),
-      password,
-    })
-    if (error) throw new Error('用户名或密码错误')
-    return loadProfile(data.user)
+  async function login() {
+    return startAnonymousJourney()
   }
 
   async function logout() {
@@ -124,5 +144,16 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null
   }
 
-  return { user, ready, isLoggedIn, currentUserId, register, login, logout, init, loadProfile }
+  return {
+    user,
+    ready,
+    isLoggedIn,
+    currentUserId,
+    startAnonymousJourney,
+    register,
+    login,
+    logout,
+    init,
+    loadProfile,
+  }
 })

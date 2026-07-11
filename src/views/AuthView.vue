@@ -11,61 +11,47 @@ const auth = useAuthStore()
 const traveler = useTravelerStore()
 const memory = useMemoryStore()
 
-const isLogin = ref(false)
 const username = ref('')
-const password = ref('')
 const gender = ref('')
 const birthday = ref('')
 const error = ref('')
 const loading = ref(false)
 
-// 旅人创建
 const showTravelerSetup = ref(false)
-const travelerGender = ref('male')
+const travelerGender = ref('female')
 const travelerIdentity = ref('forest')
 
 const identityOptions = [
-  { id: 'forest', name: '森林新人', desc: '来自密林的探索者，与树木和溪流为伴', icon: '🌲' },
-  { id: 'coast', name: '海岸旅人', desc: '追逐海浪的旅人，收藏着每一片贝壳', icon: '🌊' },
-  { id: 'mountain', name: '山峰探索者', desc: '向往高峰的攀登者，云层之上是归宿', icon: '🏔️' },
+  { id: 'forest', name: '森林新人', desc: '从柔软草甸出发，慢慢收集第一束山风', icon: '🌿' },
+  { id: 'coast', name: '海岸旅人', desc: '把潮声、贝壳和海边日落装进口袋', icon: '🌊' },
+  { id: 'mountain', name: '山峰探索者', desc: '向往高峰的攀登者，云层之上是归宿', icon: '⛰️' },
 ]
 
 const selectedIdentity = computed(() => identityOptions.find((o) => o.id === travelerIdentity.value))
 
-function toggleMode() {
-  isLogin.value = !isLogin.value
-  error.value = ''
-  showTravelerSetup.value = false
-}
-
-function toggleTravelerGender() {
-  travelerGender.value = travelerGender.value === 'male' ? 'female' : 'male'
-}
-
 async function submit() {
   error.value = ''
   loading.value = true
+
   try {
-    if (isLogin.value) {
-      const profile = await auth.login(username.value, password.value)
-      traveler.createTraveler(profile?.travelerGender || 'male', profile?.travelerIdentity || 'forest')
-      await memory.loadUserData()
-      router.push('/map')
-    } else {
-      if (!showTravelerSetup.value) {
-        // 第一步：填写基本信息，然后进入旅人创建
-        showTravelerSetup.value = true
-        loading.value = false
-        return
-      }
-      // 第二步：注册 + 创建旅人
-      await auth.register(username.value, password.value, gender.value, birthday.value, travelerGender.value, travelerIdentity.value)
-      traveler.createTraveler(travelerGender.value, travelerIdentity.value)
-      await memory.loadUserData()
-      router.push('/map')
+    if (!showTravelerSetup.value) {
+      showTravelerSetup.value = true
+      return
     }
+
+    const profile = await auth.startAnonymousJourney({
+      username: username.value,
+      gender: gender.value,
+      birthday: birthday.value,
+      travelerGender: travelerGender.value,
+      travelerIdentity: travelerIdentity.value,
+    })
+
+    traveler.createTraveler(profile?.travelerGender || travelerGender.value, profile?.travelerIdentity || travelerIdentity.value)
+    await memory.loadUserData()
+    router.push('/map')
   } catch (e) {
-    error.value = e.message
+    error.value = e.message || '旅人创建失败，请稍后再试'
   } finally {
     loading.value = false
   }
@@ -76,14 +62,13 @@ async function submit() {
   <main class="page-pad auth-view">
     <div class="auth-card">
       <p class="eyebrow">TrailMemo</p>
-      <h1>{{ isLogin ? '登录' : showTravelerSetup ? '创建你的像素旅人' : '注册' }}</h1>
+      <h1>{{ showTravelerSetup ? '创建你的像素旅人' : '唤醒山野身份' }}</h1>
       <p class="subtitle">
-        {{ isLogin ? '欢迎回来，继续你的山野之旅'
-        : showTravelerSetup ? '选择一位陪伴你探索山野的旅人'
-        : '创建一个账号，记录你的山野足迹' }}
+        {{ showTravelerSetup
+          ? `选择一位陪你探索山野的旅人：${selectedIdentity?.name || '森林新人'}`
+          : '不用注册邮箱，轻轻开档，记录你的山野足迹。' }}
       </p>
 
-      <!-- 旅人创建界面 -->
       <div v-if="showTravelerSetup" class="traveler-setup">
         <div class="traveler-preview">
           <PixelTraveler
@@ -100,14 +85,14 @@ async function submit() {
             :class="['gender-btn', { active: travelerGender === 'male' }]"
             @click="travelerGender = 'male'"
           >
-            <span>🧑</span> 男性角色
+            <span>♂</span> 男生形象
           </button>
           <button
             type="button"
             :class="['gender-btn', { active: travelerGender === 'female' }]"
             @click="travelerGender = 'female'"
           >
-            <span>👩</span> 女性角色
+            <span>♀</span> 女生形象
           </button>
         </div>
 
@@ -121,65 +106,51 @@ async function submit() {
             @click="travelerIdentity = opt.id"
           >
             <span class="identity-icon">{{ opt.icon }}</span>
-            <strong>{{ opt.name }}</strong>
-            <small>{{ opt.desc }}</small>
+            <span>
+              <strong>{{ opt.name }}</strong>
+              <small>{{ opt.desc }}</small>
+            </span>
           </button>
         </div>
 
         <p v-if="error" class="auth-error">{{ error }}</p>
 
-        <button class="primary-action" type="submit" :disabled="loading" @click="submit">
-          {{ loading ? '创建中...' : '✦ 开始山野之旅' }}
+        <button class="primary-action" type="button" :disabled="loading" @click="submit">
+          {{ loading ? '正在开档...' : '✦ 开始山野之旅' }}
         </button>
       </div>
 
-      <!-- 登录/注册表单 -->
       <form v-else class="auth-form" @submit.prevent="submit">
         <label>
-          用户名
-          <input v-model="username" type="text" placeholder="你的昵称" required maxlength="20" />
+          旅人昵称
+          <input v-model="username" type="text" placeholder="比如：远山小记" maxlength="20" />
         </label>
 
-        <label>
-          密码
-          <input v-model="password" type="password" placeholder="至少6位密码" required minlength="6" />
-        </label>
-
-        <template v-if="!isLogin">
-          <div class="inline-fields">
-            <label>
-              性别
-              <select v-model="gender">
-                <option value="">选择</option>
-                <option value="男">男</option>
-                <option value="女">女</option>
-                <option value="其他">其他</option>
-              </select>
-            </label>
-            <label class="birthday-field">
-              生日
-              <input v-model="birthday" class="birthday-input" type="date" aria-label="生日" />
-            </label>
-          </div>
-        </template>
+        <div class="inline-fields">
+          <label>
+            性别
+            <select v-model="gender">
+              <option value="">选择</option>
+              <option value="男">男</option>
+              <option value="女">女</option>
+              <option value="其他">其他</option>
+            </select>
+          </label>
+          <label class="birthday-field">
+            生日
+            <input v-model="birthday" class="birthday-input" type="date" aria-label="生日" />
+          </label>
+        </div>
 
         <p v-if="error" class="auth-error">{{ error }}</p>
 
         <button class="primary-action" type="submit" :disabled="loading">
-          {{ loading ? '处理中...' : isLogin ? '登录 ✦' : '下一步 ✦' }}
+          {{ loading ? '正在准备...' : '下一步 ✦' }}
         </button>
       </form>
-
-      <p class="auth-toggle">
-        {{ isLogin ? '还没有账号？' : '已有账号？' }}
-        <button type="button" class="link-btn" @click="toggleMode">
-          {{ isLogin ? '去注册' : '去登录' }}
-        </button>
-      </p>
     </div>
   </main>
 </template>
-
 <style scoped>
 .auth-view {
   display: grid;
