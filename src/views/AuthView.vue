@@ -11,6 +11,9 @@ const auth = useAuthStore()
 const traveler = useTravelerStore()
 const memory = useMemoryStore()
 
+const isLogin = ref(false)
+const email = ref('')
+const password = ref('')
 const username = ref('')
 const gender = ref('')
 const birthday = ref('')
@@ -29,29 +32,45 @@ const identityOptions = [
 
 const selectedIdentity = computed(() => identityOptions.find((o) => o.id === travelerIdentity.value))
 
+function toggleMode() {
+  isLogin.value = !isLogin.value
+  error.value = ''
+  showTravelerSetup.value = false
+}
+
 async function submit() {
   error.value = ''
   loading.value = true
 
   try {
+    if (isLogin.value) {
+      const profile = await auth.login(email.value, password.value)
+      traveler.createTraveler(profile?.travelerGender || 'female', profile?.travelerIdentity || 'forest')
+      await memory.loadUserData()
+      router.push('/map')
+      return
+    }
+
     if (!showTravelerSetup.value) {
       showTravelerSetup.value = true
       return
     }
 
-    const profile = await auth.startAnonymousJourney({
-      username: username.value,
-      gender: gender.value,
-      birthday: birthday.value,
-      travelerGender: travelerGender.value,
-      travelerIdentity: travelerIdentity.value,
-    })
+    const profile = await auth.register(
+      email.value,
+      password.value,
+      username.value,
+      gender.value,
+      birthday.value,
+      travelerGender.value,
+      travelerIdentity.value,
+    )
 
     traveler.createTraveler(profile?.travelerGender || travelerGender.value, profile?.travelerIdentity || travelerIdentity.value)
     await memory.loadUserData()
     router.push('/map')
   } catch (e) {
-    error.value = e.message || '旅人创建失败，请稍后再试'
+    error.value = e.message || '账号处理失败，请稍后再试'
   } finally {
     loading.value = false
   }
@@ -62,14 +81,16 @@ async function submit() {
   <main class="page-pad auth-view">
     <div class="auth-card">
       <p class="eyebrow">TrailMemo</p>
-      <h1>{{ showTravelerSetup ? '创建你的像素旅人' : '唤醒山野身份' }}</h1>
+      <h1>{{ isLogin ? '登录山野手账' : showTravelerSetup ? '创建你的像素旅人' : '创建山野账号' }}</h1>
       <p class="subtitle">
-        {{ showTravelerSetup
-          ? `选择一位陪你探索山野的旅人：${selectedIdentity?.name || '森林新人'}`
-          : '不用注册邮箱，轻轻开档，记录你的山野足迹。' }}
+        {{ isLogin
+          ? '回到你的山野星球，继续点亮走过的路。'
+          : showTravelerSetup
+            ? `选择一位陪你探索山野的旅人：${selectedIdentity?.name || '森林新人'}`
+            : '用真实邮箱保存你的手账、地图点亮和成长记录。' }}
       </p>
 
-      <div v-if="showTravelerSetup" class="traveler-setup">
+      <div v-if="showTravelerSetup && !isLogin" class="traveler-setup">
         <div class="traveler-preview">
           <PixelTraveler
             :gender="travelerGender"
@@ -116,38 +137,64 @@ async function submit() {
         <p v-if="error" class="auth-error">{{ error }}</p>
 
         <button class="primary-action" type="button" :disabled="loading" @click="submit">
-          {{ loading ? '正在开档...' : '✦ 开始山野之旅' }}
+          {{ loading ? '正在创建...' : '✦ 开始山野之旅' }}
         </button>
       </div>
 
       <form v-else class="auth-form" @submit.prevent="submit">
         <label>
-          旅人昵称
-          <input v-model="username" type="text" placeholder="比如：远山小记" maxlength="20" />
+          邮箱
+          <input v-model="email" type="email" placeholder="例如：you@qq.com" autocomplete="email" required />
         </label>
 
-        <div class="inline-fields">
+        <label>
+          密码
+          <input
+            v-model="password"
+            type="password"
+            placeholder="至少 6 位密码"
+            autocomplete="current-password"
+            required
+            minlength="6"
+          />
+        </label>
+
+        <template v-if="!isLogin">
           <label>
-            性别
-            <select v-model="gender">
-              <option value="">选择</option>
-              <option value="男">男</option>
-              <option value="女">女</option>
-              <option value="其他">其他</option>
-            </select>
+            旅人昵称
+            <input v-model="username" type="text" placeholder="比如：远山小记" maxlength="20" />
           </label>
-          <label class="birthday-field">
-            生日
-            <input v-model="birthday" class="birthday-input" type="date" aria-label="生日" />
-          </label>
-        </div>
+
+          <div class="inline-fields">
+            <label>
+              性别
+              <select v-model="gender">
+                <option value="">选择</option>
+                <option value="男">男</option>
+                <option value="女">女</option>
+                <option value="其他">其他</option>
+              </select>
+            </label>
+            <label class="birthday-field">
+              生日
+              <input v-model="birthday" class="birthday-input" type="date" aria-label="生日" />
+            </label>
+          </div>
+        </template>
 
         <p v-if="error" class="auth-error">{{ error }}</p>
 
         <button class="primary-action" type="submit" :disabled="loading">
-          {{ loading ? '正在准备...' : '下一步 ✦' }}
+          {{ loading ? '处理中...' : isLogin ? '登录 ✦' : '下一步 ✦' }}
         </button>
       </form>
+
+      <p class="auth-toggle">
+        {{ isLogin ? '还没有账号？' : '已有账号？' }}
+        <button type="button" class="link-btn" @click="toggleMode">
+          {{ isLogin ? '去注册' : '去登录' }}
+        </button>
+      </p>
     </div>
   </main>
 </template>
