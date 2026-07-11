@@ -10,6 +10,7 @@ const navItems = [
   { label: '\u65e5\u8bb0', icon: '\u{1F4D6}', to: '/journal/new' },
   { label: '\u6210\u957f', icon: '\u{1F331}', to: '/growth' },
   { label: '\u80cc\u5305', icon: '\u{1F392}', to: '/memory' },
+  { label: '\u8425\u5730', icon: '\u{1F3D5}', to: '/community' },
 ]
 </script>
 

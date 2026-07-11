@@ -1,16 +1,20 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useMemoryStore } from '../stores/memoryStore'
+import { useCommunityStore } from '../stores/communityStore'
 import CollageCard from '../components/CollageCard.vue'
 import PixelTraveler from '../components/PixelTraveler.vue'
 import { checkAchievements } from '../data/achievements.js'
 import { useTravelerStore } from '../stores/travelerStore'
 
 const memory = useMemoryStore()
+const community = useCommunityStore()
 const traveler = useTravelerStore()
 const pendingDeleteId = ref('')
 const showUnlockedPlaces = ref(false)
 const showAchievements = ref(false)
+const sharingJournalId = ref('')
+const shareDoneId = ref('')
 
 const growth = computed(() => memory.growthLevel)
 const unlockedTrails = computed(() => memory.trails.filter((trail) => memory.unlockedTrailIds.includes(trail.id)))
@@ -65,6 +69,17 @@ function cancelDelete() { pendingDeleteId.value = '' }
 async function confirmDelete(journalId) {
   await memory.deleteJournal(journalId)
   pendingDeleteId.value = ''
+}
+
+async function shareToCommunity(journal) {
+  sharingJournalId.value = journal.id
+  try {
+    await community.createPost(journal)
+    shareDoneId.value = journal.id
+    setTimeout(() => { shareDoneId.value = '' }, 2000)
+  } finally {
+    sharingJournalId.value = ''
+  }
 }
 </script>
 
@@ -194,6 +209,14 @@ async function confirmDelete(journalId) {
           <CollageCard :journal="journal" :trail="getTrailForJournal(journal)" />
           <div class="collage-actions">
             <button class="delete-btn" type="button" @click="askDelete(journal.id)">删除</button>
+            <button
+              class="share-btn"
+              type="button"
+              :disabled="sharingJournalId === journal.id"
+              @click="shareToCommunity(journal)"
+            >
+              {{ shareDoneId === journal.id ? '已分享' : sharingJournalId === journal.id ? '分享中...' : '分享到营地' }}
+            </button>
             <div v-if="pendingDeleteId === journal.id" class="delete-confirm">
               <span>确认删除？</span>
               <button class="delete-yes" type="button" @click="confirmDelete(journal.id)">确认</button>
@@ -539,6 +562,19 @@ async function confirmDelete(journalId) {
   background: transparent;
 }
 .delete-btn:hover { color: #ef4444; border-color: rgba(239, 68, 68, 0.3); }
+.share-btn {
+  padding: 4px 10px;
+  border: 1px solid rgba(110, 231, 183, 0.35);
+  border-radius: 999px;
+  color: #276749;
+  font-size: 0.7rem;
+  font-weight: 800;
+  cursor: pointer;
+  background: rgba(167, 243, 208, 0.15);
+  transition: all 0.2s;
+}
+.share-btn:hover { background: rgba(167, 243, 208, 0.3); }
+.share-btn:disabled { opacity: 0.5; cursor: default; }
 .delete-confirm {
   display: flex;
   align-items: center;

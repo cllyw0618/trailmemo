@@ -123,6 +123,60 @@ create policy "journals_update_own" on public.journals
 create policy "journals_delete_own" on public.journals
   for delete using (auth.uid() = user_id);
 
+-- 社区分享帖
+create table if not exists public.community_posts (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  title text not null default '',
+  text text default '',
+  mood text default '',
+  weather text default '',
+  images jsonb not null default '[]'::jsonb,
+  template text default 't1',
+  trail_id text not null,
+  author_name text not null,
+  author_level integer not null default 1,
+  created_at timestamptz not null default now()
+);
+
+-- 社区评论
+create table if not exists public.community_comments (
+  id uuid primary key default gen_random_uuid(),
+  post_id uuid not null references public.community_posts(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  author_name text not null,
+  text text not null,
+  created_at timestamptz not null default now()
+);
+
+alter table public.community_posts enable row level security;
+alter table public.community_comments enable row level security;
+
+-- community_posts: 所有人可查看，仅本人可新增/删除
+drop policy if exists "community_posts_select_all" on public.community_posts;
+drop policy if exists "community_posts_insert_own" on public.community_posts;
+drop policy if exists "community_posts_delete_own" on public.community_posts;
+create policy "community_posts_select_all" on public.community_posts
+  for select using (true);
+create policy "community_posts_insert_own" on public.community_posts
+  for insert with check (auth.uid() = user_id);
+create policy "community_posts_delete_own" on public.community_posts
+  for delete using (auth.uid() = user_id);
+
+-- community_comments: 所有人可查看，仅本人可新增/删除
+drop policy if exists "community_comments_select_all" on public.community_comments;
+drop policy if exists "community_comments_insert_own" on public.community_comments;
+drop policy if exists "community_comments_delete_own" on public.community_comments;
+create policy "community_comments_select_all" on public.community_comments
+  for select using (true);
+create policy "community_comments_insert_own" on public.community_comments
+  for insert with check (auth.uid() = user_id);
+create policy "community_comments_delete_own" on public.community_comments
+  for delete using (auth.uid() = user_id);
+
+create index if not exists community_posts_created_at_idx on public.community_posts(created_at desc);
+create index if not exists community_comments_post_id_idx on public.community_comments(post_id, created_at);
+
 create index if not exists characters_user_id_idx on public.characters(user_id);
 create index if not exists hikes_user_id_created_at_idx on public.hikes(user_id, created_at desc);
 create index if not exists unlocked_trails_user_id_idx on public.unlocked_trails(user_id);
