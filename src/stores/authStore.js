@@ -12,7 +12,7 @@ function hashUsername(username) {
 }
 
 function usernameToEmail(username) {
-  return `trailmemo-${hashUsername(username)}@trailmemo.local`
+  return `trailmemo-${hashUsername(username)}@trailmemo.app`
 }
 
 function normalizeProfile(profile, authUser) {
