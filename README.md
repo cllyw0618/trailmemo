@@ -4,6 +4,8 @@
 
 用户可以在交互式 3D 地球上探索全球徒步路线，点亮已完成的路线，通过上传照片和文字自动生成拼贴风格的手账，并在成长系统的陪伴下，从「山野新手」一步步成长为「地球漫游者」。
 
+> 在线演示：[TrailMemo on Vercel](https://trailmemo.vercel.app)
+
 ---
 
 ## 技术栈
@@ -15,10 +17,10 @@
 | 路由 | Vue Router 5 |
 | 状态管理 | Pinia 3 |
 | 3D 渲染 | Three.js (r185) |
-| 地图数据 | GeoJSON + 自定义纹理 |
-| 后端 | Express.js |
-| 数据库 | SQLite (better-sqlite3) |
-| 密码加密 | bcryptjs |
+| 地图数据 | 自定义纹理 + 经纬度坐标 |
+| 后端服务 | Supabase（认证 + 数据库） |
+| 数据库 | PostgreSQL（Supabase 托管） |
+| 部署平台 | Vercel |
 
 ---
 
@@ -41,19 +43,19 @@
 - 点击标记点直接跳转到手账编辑页
 
 ### 3. 用户系统
-- 支持**注册**（用户名、密码、性别、生日）
-- 支持**登录**
-- 密码使用 bcryptjs 加密存储
-- 基于 SQLite 的持久化数据存储
+- 支持**邮箱注册**（用户名、密码、性别、生日、像素旅人创建）
+- 支持**邮箱登录**
+- 支持**游客访问**（无需邮箱密码，一键体验，后续可绑定邮箱升级）
+- 基于 Supabase Auth 的身份认证，游客与正式账号共享同一 user_id
+- 数据通过 Supabase PostgreSQL 持久化存储，RLS 行级安全隔离
 
 ### 4. 拼贴手账（Collage Journal）
 - 上传照片后，系统自动按**固定模板**排版
-- 提供 **5 种拼贴模板**：
-  - **单图大版** — 一张大图 + 文字
-  - **双图并排** — 两图并列 + 文字
-  - **一大一小** — 大图左侧 + 小图和文字右侧
-  - **三图网格** — 三图排列 + 文字
-  - **满版图文** — 全宽图片 + 文字叠加
+- 提供 **4 种拼贴模板**：
+  - **t1 一图日记** — 一张大图 + 文字
+  - **t2 两张瞬间** — 主图 + 侧图
+  - **t3 三格旅页** — 三张图错落排版
+  - **t4 四宫拼贴** — 四张图 + 便签纸
 - 图片自动压缩至 800px 宽度，优化存储
 - 实时预览拼贴效果
 - 手账卡片包含：照片、标题、文字、心情标签、天气标签、日期
@@ -69,7 +71,7 @@
 - 芯片式按钮，悬停可预览路线
 - 已解锁路线有绿色圆点标记
 
-### 7. 山野成长系统（新增）
+### 7. 山野成长系统
 - **路线章节系统**：18 条路线分为四个章节
   - 向山而行（4条）：初入山野的入门路线
   - 进入荒野（4条）：更高强度的荒野挑战
@@ -86,20 +88,25 @@
   - 16+ → 地球漫游者
 - **旅程进度面板**：在地图页显示当前等级、已点亮数量、距离下一等级的进度
 
-### 8. 轻量成就系统（新增）
+### 8. 轻量成就系统
 - 共 11 个轻量成就，基于已点亮路线自动计算
 - 成就包括：第一束山风、草甸收藏家、雪山旅人、峡谷穿越者、海岸漫步者、朝圣者等
 - 已解锁成就高亮显示，未解锁成就灰色显示
 
-### 9. 回忆卡片（新增）
+### 9. 回忆卡片
 - 手账卡片底部增加路线故事信息：旅程章节、情绪关键词、路线短句
 - 小字体手写风格，不影响照片展示
 
-### 10. 成长卡与统计（新增）
+### 10. 成长卡与统计
 - 在手账展示页顶部添加「山野成长卡」
 - 显示当前称号、已点亮路线、累计公里数、手账记录数量
 - 按类型统计已收集路线数量
 - 按章节显示进度
+
+### 11. 像素旅人系统
+- 注册时创建专属像素旅人：选择性别（男/女）和初始身份（森林新人/海岸旅人/山峰探索者）
+- Canvas 逐像素绘制，分层渲染（身体、头发、衣服、背包、装备、徽章）
+- 等级驱动装备变化：Lv1-Lv16+ 逐步解锁帽子、外套、背包、登山杖、围巾、徽章
 
 ---
 
@@ -107,36 +114,41 @@
 
 ```
 trailmemo/
-├── backend/                    # 后端服务
-│   ├── server.js              # Express 服务器 + API 路由
-│   ├── package.json           # 后端依赖
-│   └── data.db                # SQLite 数据库（自动生成）
 ├── public/
 │   └── textures/
 │       └── earth_atmos_2048.jpg  # 地球卫星纹理
 ├── src/
 │   ├── components/
-│   │   ├── TrailMap3D.vue     # 3D 地球组件（Three.js）
-│   │   └── CollageCard.vue    # 拼贴手账渲染组件
+│   │   ├── TrailMap3D.vue        # 3D 地球组件（Three.js）
+│   │   ├── CollageCard.vue       # 拼贴手账渲染组件
+│   │   ├── PixelTraveler.vue     # 像素旅人绘制组件
+│   │   └── HelloWorld.vue        # 默认示例组件
 │   ├── views/
-│   │   ├── LoadingView.vue    # 启动加载页
-│   │   ├── AuthView.vue       # 注册 / 登录页
-│   │   ├── MapView.vue        # 3D 地图主页
-│   │   ├── JournalEditorView.vue  # 手账编辑器
-│   │   └── MemoryView.vue     # 手账展示页
+│   │   ├── LoadingView.vue       # 启动加载页
+│   │   ├── AuthView.vue          # 认证页（注册/登录/游客访问）
+│   │   ├── MapView.vue           # 3D 地图主页
+│   │   ├── JournalEditorView.vue # 手账编辑器
+│   │   ├── MemoryView.vue        # 旅人档案页
+│   │   └── TrailDetailView.vue   # 路线详情页
 │   ├── stores/
-│   │   ├── memoryStore.js     # 手账数据 Store
-│   │   └── authStore.js       # 用户认证 Store
+│   │   ├── authStore.js          # 用户认证 Store
+│   │   ├── memoryStore.js        # 手账数据 Store
+│   │   └── travelerStore.js      # 像素旅人 Store
 │   ├── data/
-│   │   ├── trails.js          # 18 条徒步路线数据（含故事字段）
-│   │   └── achievements.js    # 成就系统定义
+│   │   ├── trails.js             # 18 条徒步路线数据（含故事字段）
+│   │   ── achievements.js       # 成就系统定义
+│   ├── lib/
+│   │   └── supabase.js           # Supabase 客户端配置
 │   ├── router/
-│   │   └── index.js           # 路由配置
+│   │   ── index.js              # 路由配置
 │   ├── styles/
-│   │   └── global.css         # 全局样式
-│   ├── App.vue                # 根组件
-│   └── main.js                # 入口文件
+│   │   └── global.css            # 全局样式
+│   ├── App.vue                   # 根组件
+│   ── main.js                   # 入口文件
+├── docs/
+│   └── supabase-schema.sql       # 数据库建表脚本
 ├── package.json
+├── vercel.json                   # Vercel 部署配置
 ├── vite.config.js
 └── README.md
 ```
@@ -180,49 +192,68 @@ trailmemo/
 ### 环境要求
 - Node.js >= 18
 - npm >= 9
+- Supabase 项目（用于认证和数据库）
 
-### 1. 安装前端依赖
+### 1. 克隆并安装依赖
 
 ```bash
 cd trailmemo
 npm install
 ```
 
-### 2. 安装后端依赖
+### 2. 配置 Supabase
 
-```bash
-cd backend
-npm install
+在项目根目录创建 `.env.local` 文件：
+
+```env
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-publishable-or-anon-key
 ```
 
-### 3. 启动服务
+在 Supabase SQL Editor 中执行 `docs/supabase-schema.sql` 初始化数据库表。
 
-需要同时启动前端和后端两个服务：
+### 3. 启动开发服务器
 
-**启动前端（开发服务器）：**
 ```bash
-cd trailmemo
 npm run dev
 ```
-前端运行在 `http://localhost:5173`
-
-**启动后端 API：**
-```bash
-cd trailmemo/backend
-node server.js
-```
-后端运行在 `http://localhost:3001`
-
-### 4. 打开浏览器
 
 访问 `http://localhost:5173` 即可使用。
+
+### 4. 构建生产版本
+
+```bash
+npm run build
+```
+
+---
+
+## 部署
+
+项目已配置 [Vercel](https://vercel.com) 自动部署：
+
+```json
+{
+  "framework": "vite",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
+```
+
+在 Vercel 中设置环境变量 `VITE_SUPABASE_URL` 和 `VITE_SUPABASE_ANON_KEY` 后即可自动构建部署。
 
 ---
 
 ## 使用流程
 
-1. **启动页** — 自动过渡到注册/登录页
-2. **注册/登录** — 创建账号或登录已有账号
+1. **启动页** — 点击「唤醒山野记忆」进入认证页
+2. **认证页** — 选择注册 / 登录 / 游客访问三种方式进入
+   - 注册：填写邮箱密码，创建像素旅人形象
+   - 登录：已有账号直接登录
+   - 游客：一键进入，后续可绑定邮箱
 3. **3D 地图** — 浏览全球徒步路线，开启成长之旅
    - 地球自动旋转，可拖拽和缩放
    - 蓝色标记 = 未解锁，绿色标记 = 已解锁
@@ -230,7 +261,7 @@ node server.js
    - 点击路线弹出预览弹窗，查看路线故事和难度信息
    - 点击「开始记录这段旅程」进入手账编辑
 4. **写手账** — 选择模板、上传照片、写下心情
-   - 5 种拼贴模板可选
+   - 4 种拼贴模板可选
    - 实时预览拼贴效果
    - 可添加心情和天气标签
    - 保存后弹出「路线已点亮」反馈弹窗，显示等级进度
@@ -242,61 +273,18 @@ node server.js
 
 ---
 
-## API 文档
+## 数据库设计
 
-### 基础地址
-```
-http://localhost:3001/api
-```
+基于 Supabase PostgreSQL，核心表结构：
 
-### 注册
-```
-POST /api/register
-Content-Type: application/json
+| 表名 | 说明 | 主要字段 |
+|------|------|---------|
+| profiles | 用户档案 | id, username, gender, birthday, traveler_gender, traveler_identity, level, experience |
+| characters | 像素角色 | user_id, character_type, equipment (JSONB), level |
+| unlocked_trails | 已解锁路线 | user_id, trail_id, created_at |
+| journals | 手账记录 | id, user_id, trail_id, title, mood, weather, text, images (JSONB), template |
 
-{
-  "username": "string (2-20位)",
-  "password": "string (至少6位)",
-  "gender": "string (男/女/其他)",
-  "birthday": "string (YYYY-MM-DD)"
-}
-```
-
-**响应：**
-```json
-{
-  "id": 1,
-  "username": "example",
-  "gender": "男",
-  "birthday": "2000-01-01"
-}
-```
-
-### 登录
-```
-POST /api/login
-Content-Type: application/json
-
-{
-  "username": "string",
-  "password": "string"
-}
-```
-
-**响应：**
-```json
-{
-  "id": 1,
-  "username": "example",
-  "gender": "男",
-  "birthday": "2000-01-01"
-}
-```
-
-### 用户列表（调试用）
-```
-GET /api/users
-```
+所有表启用 RLS（Row Level Security），通过 `auth.uid()` 实现用户数据隔离。
 
 ---
 
@@ -315,9 +303,10 @@ GET /api/users
 - **Three.js 3D 渲染**：真实地球纹理、凹凸贴图、多层光照、环境反射
 - **智能标签布局**：切线方向偏移算法，避免邻近标签重叠
 - **图片自动压缩**：上传时 Canvas 压缩至 800px，优化存储
-- **拼贴模板引擎**：CSS Grid 实现 5 种固定布局模板
+- **拼贴模板引擎**：CSS Grid 实现 4 种固定布局模板
 - **毛玻璃效果**：backdrop-filter 实现半透明磨砂 UI
-- **SQLite 持久化**：文件型数据库，零配置
+- **Supabase 全栈服务**：认证 + PostgreSQL + RLS 行级安全，零后端代码
+- **像素旅人系统**：Canvas 逐像素绘制，等级驱动装备变化
 - **成长等级系统**：基于已解锁路线数量自动计算等级和进度
 - **轻量成就系统**：前端纯计算成就状态，无需后端支持
 - **路线章节系统**：18 条路线按章节分组，展示章节进度
