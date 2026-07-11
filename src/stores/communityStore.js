@@ -114,7 +114,12 @@ export const useCommunityStore = defineStore('community', {
         .insert(payload)
         .select('*')
         .single()
-      if (error) throw new Error(error.message)
+      if (error) {
+        if (error.code === '42P01' || /relation .* does not exist/i.test(error.message || '')) {
+          throw new Error('社区表未创建，请在 Supabase SQL Editor 中执行 docs/supabase-schema.sql')
+        }
+        throw new Error(error.message)
+      }
       const post = toPost(data)
       this.posts.unshift(post)
       return post
@@ -191,8 +196,13 @@ export const useCommunityStore = defineStore('community', {
           })
           .select('*')
           .single()
-        if (error) throw new Error(error.message)
-        if (post) {
+        if (error) {
+        if (error.code === '42P01' || /relation .* does not exist/i.test(error.message || '')) {
+          throw new Error('社区表未创建，请在 Supabase SQL Editor 中执行 docs/supabase-schema.sql')
+        }
+        throw new Error(error.message)
+      }
+      if (post) {
           const idx = post.comments.findIndex((c) => c.id === comment.id)
           if (idx >= 0) post.comments.splice(idx, 1, toComment(data))
         }

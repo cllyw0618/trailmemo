@@ -77,6 +77,8 @@ async function shareToCommunity(journal) {
     await community.createPost(journal)
     shareDoneId.value = journal.id
     setTimeout(() => { shareDoneId.value = '' }, 2000)
+  } catch (e) {
+    alert('分享失败：' + (e.message || '请确认 Supabase 已创建 community_posts 表'))
   } finally {
     sharingJournalId.value = ''
   }
