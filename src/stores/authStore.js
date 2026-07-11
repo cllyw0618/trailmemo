@@ -105,10 +105,7 @@ export const useAuthStore = defineStore('auth', () => {
       .from('characters')
       .upsert(payload, { onConflict: 'user_id' })
 
-    if (error && !isMissingTableError(error)) {
-      throw new Error('像素角色初始化失败，请稍后再试')
-    }
-
+    if (error && !isMissingTableError(error)) throw new Error('像素角色初始化失败，请稍后再试')
     return payload
   }
 
@@ -126,6 +123,35 @@ export const useAuthStore = defineStore('auth', () => {
     const profileRow = data || await saveProfile(authUser)
     await ensureCharacter(authUser, profileRow)
     return setAuthState(authUser, authSession, profileRow)
+  }
+
+  async function initAuth() {
+    authError.value = ''
+    ready.value = false
+
+    try {
+      if (!hasSupabaseConfig) {
+        user.value = null
+        profile.value = null
+        session.value = null
+        return null
+      }
+
+      const { data, error } = await supabase.auth.getSession()
+      if (error) throw new Error('登录状态恢复失败，请检查网络后重试')
+
+      if (data?.session?.user) return await loadProfile(data.session.user, data.session)
+
+      user.value = null
+      profile.value = null
+      session.value = null
+      return null
+    } catch (error) {
+      authError.value = error.message || '认证初始化失败，请刷新页面重试'
+      throw error
+    } finally {
+      ready.value = true
+    }
   }
 
   async function anonymousLogin() {
@@ -151,40 +177,11 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     const { data, error } = await supabase.auth.signInAnonymously()
-    if (error) {
-      throw new Error('游客登录失败，请确认 Supabase 已开启 Anonymous Sign-ins')
-    }
+    if (error) throw new Error('游客访问失败，请确认 Supabase 已开启 Anonymous Sign-ins')
 
-    session.value = data.session || null
     const profileRow = await saveProfile(data.user)
     await ensureCharacter(data.user, profileRow)
     return setAuthState(data.user, data.session, profileRow)
-  }
-
-  async function initAuth() {
-    authError.value = ''
-    ready.value = false
-
-    try {
-      if (!hasSupabaseConfig) {
-        await anonymousLogin()
-        return user.value
-      }
-
-      const { data, error } = await supabase.auth.getSession()
-      if (error) throw new Error('登录状态恢复失败，请检查网络后重试')
-
-      if (data?.session?.user) {
-        return await loadProfile(data.session.user, data.session)
-      }
-
-      return await anonymousLogin()
-    } catch (error) {
-      authError.value = error.message || '认证初始化失败，请刷新页面重试'
-      throw error
-    } finally {
-      ready.value = true
-    }
   }
 
   async function linkEmailAccount(email, password) {
@@ -204,7 +201,7 @@ export const useAuthStore = defineStore('auth', () => {
     let currentSession = sessionData?.session
     if (!currentSession?.user) {
       const { data, error } = await supabase.auth.signInAnonymously()
-      if (error) throw new Error('游客登录失败，请确认 Supabase 已开启 Anonymous Sign-ins')
+      if (error) throw new Error('游客访问失败，请确认 Supabase 已开启 Anonymous Sign-ins')
       currentSession = data.session
     }
 
@@ -214,7 +211,7 @@ export const useAuthStore = defineStore('auth', () => {
     })
 
     if (error) {
-      if (isDuplicateEmailError(error)) throw new Error('这个邮箱已经绑定过账号，请换一个邮箱或使用已有账号登录')
+      if (isDuplicateEmailError(error)) throw new Error('这个邮箱已经绑定过账号，请换一个邮箱或直接登录')
       throw new Error(error.message || '邮箱绑定失败，请稍后再试')
     }
 
@@ -222,6 +219,57 @@ export const useAuthStore = defineStore('auth', () => {
     const authUser = refreshed?.session?.user || data?.user || currentSession.user
     await loadProfile(authUser, refreshed?.session || currentSession)
     return user.value
+  }
+
+  async function register(email, password, options = {}) {
+    if (isAnonymous.value) return linkEmailAccount(email, password)
+
+    const normalizedEmail = validateEmailPassword(email, password)
+
+    if (!hasSupabaseConfig) {
+      const localId = `local-${Date.now()}`
+      const localProfile = {
+        id: localId,
+        email: normalizedEmail,
+        username: cleanText(options.username) || makeDefaultName(localId),
+        gender: cleanText(options.gender),
+        birthday: cleanText(options.birthday),
+        travelerGender: options.travelerGender || 'female',
+        travelerIdentity: options.travelerIdentity || 'forest',
+        level: 1,
+        experience: 0,
+        isAnonymous: false,
+      }
+      user.value = localProfile
+      profile.value = localProfile
+      return user.value
+    }
+
+    const metadata = {
+      username: cleanText(options.username) || makeDefaultName(),
+      gender: cleanText(options.gender),
+      birthday: cleanText(options.birthday),
+      travelerGender: options.travelerGender || 'female',
+      travelerIdentity: options.travelerIdentity || 'forest',
+    }
+
+    const { data, error } = await supabase.auth.signUp({
+      email: normalizedEmail,
+      password,
+      options: { data: metadata },
+    })
+
+    if (error) {
+      if (isDuplicateEmailError(error)) throw new Error('这个邮箱已经注册过啦，请直接登录')
+      throw new Error(error.message || '注册失败，请稍后再试')
+    }
+
+    if (!data?.user) throw new Error('注册失败，请稍后再试')
+    if (!data.session) throw new Error('注册成功，请先到邮箱确认后再登录；答辩演示建议关闭邮箱确认。')
+
+    const profileRow = await saveProfile(data.user, metadata)
+    await ensureCharacter(data.user, profileRow)
+    return setAuthState(data.user, data.session, profileRow)
   }
 
   async function login(email, password) {
@@ -259,10 +307,6 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null
     profile.value = null
     session.value = null
-  }
-
-  async function register(email, password) {
-    return linkEmailAccount(email, password)
   }
 
   async function init() {
