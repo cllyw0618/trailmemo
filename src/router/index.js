@@ -4,12 +4,14 @@ import AuthView from '../views/AuthView.vue'
 import MapView from '../views/MapView.vue'
 import JournalEditorView from '../views/JournalEditorView.vue'
 import MemoryView from '../views/MemoryView.vue'
+import GrowthView from '../views/GrowthView.vue'
 
 const routes = [
   { path: '/', name: 'loading', component: LoadingView },
   { path: '/auth', name: 'auth', component: AuthView },
   { path: '/map', name: 'map', component: MapView },
   { path: '/journal/new', name: 'journal-new', component: JournalEditorView },
+  { path: '/growth', name: 'growth', component: GrowthView },
   { path: '/memory', name: 'memory', component: MemoryView },
 ]
 
