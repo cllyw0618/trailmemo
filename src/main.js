@@ -16,10 +16,14 @@ async function bootstrap() {
   const memory = useMemoryStore(pinia)
   const traveler = useTravelerStore(pinia)
 
-  await auth.init()
-  if (auth.user) {
-    traveler.createTraveler(auth.user.travelerGender || 'male', auth.user.travelerIdentity || 'forest')
-    await memory.loadUserData()
+  try {
+    await auth.initAuth()
+    if (auth.user) {
+      traveler.createTraveler(auth.user.travelerGender || 'female', auth.user.travelerIdentity || 'forest')
+      await memory.loadUserData()
+    }
+  } catch (error) {
+    console.error('[TrailMemo] auth bootstrap failed:', error)
   }
 
   app.mount('#app')

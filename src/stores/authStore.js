@@ -2,81 +2,117 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { supabase, hasSupabaseConfig } from '../lib/supabase'
 
-function makeDefaultName() {
-  return `山野旅人${Math.floor(100 + Math.random() * 900)}`
-}
-
 function cleanText(value) {
   return String(value || '').trim()
+}
+
+function makeDefaultName(userId = '') {
+  const suffix = userId ? userId.slice(0, 6) : Math.floor(1000 + Math.random() * 9000)
+  return `山野旅人${suffix}`
 }
 
 function normalizeEmail(email) {
   return cleanText(email).toLowerCase()
 }
 
-function assertAuthInput(email, password) {
+function validateEmailPassword(email, password) {
   const normalizedEmail = normalizeEmail(email)
   if (!normalizedEmail || !password) throw new Error('邮箱和密码不能为空')
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) throw new Error('请输入有效的邮箱地址')
-  if (password.length < 6) throw new Error('密码长度至少 6 位')
+  if (password.length < 6) throw new Error('密码至少需要 6 位')
   return normalizedEmail
 }
 
-function buildProfileDraft(options = {}) {
-  return {
-    username: cleanText(options.username) || makeDefaultName(),
-    gender: cleanText(options.gender),
-    birthday: cleanText(options.birthday),
-    traveler_gender: options.travelerGender || options.traveler_gender || 'female',
-    traveler_identity: options.travelerIdentity || options.traveler_identity || 'forest',
-    updated_at: new Date().toISOString(),
-  }
+function isMissingTableError(error) {
+  return error?.code === '42P01' || /relation .* does not exist/i.test(error?.message || '')
+}
+
+function isDuplicateEmailError(error) {
+  const message = error?.message?.toLowerCase() || ''
+  return message.includes('already') || message.includes('registered') || message.includes('exists')
 }
 
 function normalizeProfile(profile, authUser) {
   if (!profile && !authUser) return null
   return {
-    id: profile?.id || authUser?.id,
+    id: profile?.id || authUser?.id || '',
     email: authUser?.email || '',
-    username: profile?.username || authUser?.user_metadata?.username || makeDefaultName(),
+    username: profile?.username || authUser?.user_metadata?.username || makeDefaultName(authUser?.id),
+    avatar: profile?.avatar || '',
     gender: profile?.gender || authUser?.user_metadata?.gender || '',
     birthday: profile?.birthday || authUser?.user_metadata?.birthday || '',
+    level: profile?.level ?? 1,
+    experience: profile?.experience ?? 0,
     travelerGender: profile?.traveler_gender || authUser?.user_metadata?.travelerGender || 'female',
     travelerIdentity: profile?.traveler_identity || authUser?.user_metadata?.travelerIdentity || 'forest',
-    isAnonymous: false,
+    isAnonymous: authUser?.is_anonymous ?? !authUser?.email,
   }
 }
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref(null)
+  const session = ref(null)
+  const profile = ref(null)
   const ready = ref(false)
+  const authError = ref('')
 
+  const isAnonymous = computed(() => Boolean(user.value?.isAnonymous))
   const isLoggedIn = computed(() => user.value !== null)
   const currentUserId = computed(() => user.value?.id || '')
 
-  async function saveProfile(authUser, options = {}) {
-    if (!authUser) throw new Error('账号创建失败，请稍后再试')
-
-    const profilePayload = {
-      id: authUser.id,
-      ...buildProfileDraft(options),
-    }
-
-    const { data: profile, error } = await supabase
-      .from('profiles')
-      .upsert(profilePayload, { onConflict: 'id' })
-      .select('*')
-      .single()
-
-    if (error) {
-      throw new Error('旅人资料保存失败。请确认 Supabase 已运行建表 SQL，并关闭邮箱确认。')
-    }
-
-    user.value = normalizeProfile(profile, authUser)
+  function setAuthState(authUser, authSession, profileRow = null) {
+    session.value = authSession || null
+    profile.value = normalizeProfile(profileRow, authUser)
+    user.value = profile.value
     return user.value
   }
 
-  async function loadProfile(authUser) {
+  async function saveProfile(authUser, options = {}) {
+    if (!hasSupabaseConfig) return null
+    if (!authUser) throw new Error('用户身份创建失败，请稍后再试')
+
+    const payload = {
+      id: authUser.id,
+      username: cleanText(options.username) || authUser.user_metadata?.username || makeDefaultName(authUser.id),
+      gender: cleanText(options.gender || authUser.user_metadata?.gender),
+      birthday: cleanText(options.birthday || authUser.user_metadata?.birthday),
+      traveler_gender: options.travelerGender || authUser.user_metadata?.travelerGender || 'female',
+      traveler_identity: options.travelerIdentity || authUser.user_metadata?.travelerIdentity || 'forest',
+      updated_at: new Date().toISOString(),
+    }
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .upsert(payload, { onConflict: 'id' })
+      .select('*')
+      .single()
+
+    if (error) throw new Error('用户档案保存失败，请确认 Supabase 数据表和 RLS 已配置完成')
+    return data
+  }
+
+  async function ensureCharacter(authUser, profileRow = null) {
+    if (!hasSupabaseConfig || !authUser) return null
+
+    const payload = {
+      user_id: authUser.id,
+      character_type: profileRow?.traveler_identity || authUser.user_metadata?.travelerIdentity || 'forest',
+      equipment: [],
+      level: profileRow?.level || 1,
+    }
+
+    const { error } = await supabase
+      .from('characters')
+      .upsert(payload, { onConflict: 'user_id' })
+
+    if (error && !isMissingTableError(error)) {
+      throw new Error('像素角色初始化失败，请稍后再试')
+    }
+
+    return payload
+  }
+
+  async function loadProfile(authUser, authSession = session.value) {
     if (!hasSupabaseConfig || !authUser) return null
 
     const { data, error } = await supabase
@@ -85,83 +121,112 @@ export const useAuthStore = defineStore('auth', () => {
       .eq('id', authUser.id)
       .maybeSingle()
 
-    if (error) throw new Error(error.message)
+    if (error) throw new Error('用户资料加载失败，请检查网络后重试')
 
-    if (!data) {
-      return saveProfile(authUser, {
-        username: authUser.user_metadata?.username || makeDefaultName(),
-        gender: authUser.user_metadata?.gender || '',
-        birthday: authUser.user_metadata?.birthday || '',
-        travelerGender: authUser.user_metadata?.travelerGender || 'female',
-        travelerIdentity: authUser.user_metadata?.travelerIdentity || 'forest',
-      })
-    }
-
-    user.value = normalizeProfile(data, authUser)
-    return user.value
+    const profileRow = data || await saveProfile(authUser)
+    await ensureCharacter(authUser, profileRow)
+    return setAuthState(authUser, authSession, profileRow)
   }
 
-  async function init() {
-    if (!hasSupabaseConfig) {
-      ready.value = true
-      return null
-    }
-
-    const { data, error } = await supabase.auth.getUser()
-    if (!error && data?.user) {
-      await loadProfile(data.user)
-    }
-
-    ready.value = true
-    return user.value
-  }
-
-  async function register(email, password, username, gender, birthday, travelerGender = 'female', travelerIdentity = 'forest') {
-    const normalizedEmail = assertAuthInput(email, password)
-    const profileDraft = buildProfileDraft({ username, gender, birthday, travelerGender, travelerIdentity })
+  async function anonymousLogin() {
+    authError.value = ''
 
     if (!hasSupabaseConfig) {
-      user.value = {
-        id: `local-${Date.now()}`,
-        email: normalizedEmail,
-        username: profileDraft.username,
-        gender: profileDraft.gender,
-        birthday: profileDraft.birthday,
-        travelerGender: profileDraft.traveler_gender,
-        travelerIdentity: profileDraft.traveler_identity,
-        isAnonymous: false,
+      const localId = `local-${Date.now()}`
+      const localProfile = {
+        id: localId,
+        username: makeDefaultName(localId),
+        gender: '',
+        birthday: '',
+        travelerGender: 'female',
+        travelerIdentity: 'forest',
+        level: 1,
+        experience: 0,
+        isAnonymous: true,
       }
+      user.value = localProfile
+      profile.value = localProfile
+      session.value = null
       return user.value
     }
 
-    const { data, error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signInAnonymously()
+    if (error) {
+      throw new Error('游客登录失败，请确认 Supabase 已开启 Anonymous Sign-ins')
+    }
+
+    session.value = data.session || null
+    const profileRow = await saveProfile(data.user)
+    await ensureCharacter(data.user, profileRow)
+    return setAuthState(data.user, data.session, profileRow)
+  }
+
+  async function initAuth() {
+    authError.value = ''
+    ready.value = false
+
+    try {
+      if (!hasSupabaseConfig) {
+        await anonymousLogin()
+        return user.value
+      }
+
+      const { data, error } = await supabase.auth.getSession()
+      if (error) throw new Error('登录状态恢复失败，请检查网络后重试')
+
+      if (data?.session?.user) {
+        return await loadProfile(data.session.user, data.session)
+      }
+
+      return await anonymousLogin()
+    } catch (error) {
+      authError.value = error.message || '认证初始化失败，请刷新页面重试'
+      throw error
+    } finally {
+      ready.value = true
+    }
+  }
+
+  async function linkEmailAccount(email, password) {
+    authError.value = ''
+    const normalizedEmail = validateEmailPassword(email, password)
+
+    if (!hasSupabaseConfig) {
+      if (!user.value) await anonymousLogin()
+      user.value = { ...user.value, email: normalizedEmail, isAnonymous: false }
+      profile.value = user.value
+      return user.value
+    }
+
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+    if (sessionError) throw new Error('登录状态读取失败，请刷新后重试')
+
+    let currentSession = sessionData?.session
+    if (!currentSession?.user) {
+      const { data, error } = await supabase.auth.signInAnonymously()
+      if (error) throw new Error('游客登录失败，请确认 Supabase 已开启 Anonymous Sign-ins')
+      currentSession = data.session
+    }
+
+    const { data, error } = await supabase.auth.updateUser({
       email: normalizedEmail,
       password,
-      options: {
-        data: {
-          username: profileDraft.username,
-          gender: profileDraft.gender,
-          birthday: profileDraft.birthday,
-          travelerGender: profileDraft.traveler_gender,
-          travelerIdentity: profileDraft.traveler_identity,
-        },
-      },
     })
 
     if (error) {
-      const message = error.message?.toLowerCase() || ''
-      if (message.includes('already') || message.includes('registered')) throw new Error('这个邮箱已经注册过啦，请直接登录')
-      throw new Error(error.message || '注册失败，请稍后再试')
+      if (isDuplicateEmailError(error)) throw new Error('这个邮箱已经绑定过账号，请换一个邮箱或使用已有账号登录')
+      throw new Error(error.message || '邮箱绑定失败，请稍后再试')
     }
 
-    if (!data?.user) throw new Error('注册失败，请稍后再试')
-    if (!data.session) throw new Error('注册成功，请先到邮箱确认后再登录；如果用于答辩演示，建议在 Supabase 关闭邮箱确认。')
-
-    return saveProfile(data.user, profileDraft)
+    const { data: refreshed } = await supabase.auth.getSession()
+    const authUser = refreshed?.session?.user || data?.user || currentSession.user
+    await loadProfile(authUser, refreshed?.session || currentSession)
+    return user.value
   }
 
   async function login(email, password) {
-    const normalizedEmail = assertAuthInput(email, password)
+    authError.value = ''
+    const normalizedEmail = validateEmailPassword(email, password)
 
     if (!hasSupabaseConfig) {
       user.value = {
@@ -172,8 +237,11 @@ export const useAuthStore = defineStore('auth', () => {
         birthday: '',
         travelerGender: 'female',
         travelerIdentity: 'forest',
+        level: 1,
+        experience: 0,
         isAnonymous: false,
       }
+      profile.value = user.value
       return user.value
     }
 
@@ -183,19 +251,36 @@ export const useAuthStore = defineStore('auth', () => {
     })
 
     if (error) throw new Error('邮箱或密码错误，请再检查一下')
-    return loadProfile(data.user)
+    return loadProfile(data.user, data.session)
   }
 
   async function logout() {
     if (hasSupabaseConfig) await supabase.auth.signOut()
     user.value = null
+    profile.value = null
+    session.value = null
+  }
+
+  async function register(email, password) {
+    return linkEmailAccount(email, password)
+  }
+
+  async function init() {
+    return initAuth()
   }
 
   return {
     user,
+    session,
+    isAnonymous,
+    profile,
     ready,
+    authError,
     isLoggedIn,
     currentUserId,
+    initAuth,
+    anonymousLogin,
+    linkEmailAccount,
     register,
     login,
     logout,

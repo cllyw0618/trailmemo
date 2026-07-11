@@ -11,66 +11,47 @@ const auth = useAuthStore()
 const traveler = useTravelerStore()
 const memory = useMemoryStore()
 
-const isLogin = ref(false)
+const mode = ref('bind')
 const email = ref('')
 const password = ref('')
-const username = ref('')
-const gender = ref('')
-const birthday = ref('')
 const error = ref('')
+const success = ref('')
 const loading = ref(false)
 
-const showTravelerSetup = ref(false)
-const travelerGender = ref('female')
-const travelerIdentity = ref('forest')
+const displayName = computed(() => auth.profile?.username || auth.user?.username || '山野旅人')
+const travelerGender = computed(() => auth.profile?.travelerGender || auth.user?.travelerGender || 'female')
+const travelerIdentity = computed(() => auth.profile?.travelerIdentity || auth.user?.travelerIdentity || 'forest')
 
-const identityOptions = [
-  { id: 'forest', name: '森林新人', desc: '从柔软草甸出发，慢慢收集第一束山风', icon: '🌿' },
-  { id: 'coast', name: '海岸旅人', desc: '把潮声、贝壳和海边日落装进口袋', icon: '🌊' },
-  { id: 'mountain', name: '山峰探索者', desc: '向往高峰的攀登者，云层之上是归宿', icon: '⛰️' },
-]
-
-const selectedIdentity = computed(() => identityOptions.find((o) => o.id === travelerIdentity.value))
-
-function toggleMode() {
-  isLogin.value = !isLogin.value
+function switchMode(nextMode) {
+  mode.value = nextMode
   error.value = ''
-  showTravelerSetup.value = false
+  success.value = ''
 }
 
 async function submit() {
   error.value = ''
+  success.value = ''
   loading.value = true
 
   try {
-    if (isLogin.value) {
-      const profile = await auth.login(email.value, password.value)
-      traveler.createTraveler(profile?.travelerGender || 'female', profile?.travelerIdentity || 'forest')
-      await memory.loadUserData()
-      router.push('/map')
-      return
+    let profile
+    if (mode.value === 'bind') {
+      if (!auth.isAnonymous) {
+        success.value = '当前已经是正式账号，不需要重复绑定。'
+        return
+      }
+      profile = await auth.linkEmailAccount(email.value, password.value)
+      success.value = '绑定成功！你的山野进度已经保存到邮箱账号。'
+    } else {
+      profile = await auth.login(email.value, password.value)
+      success.value = '登录成功，正在回到山野星球。'
     }
 
-    if (!showTravelerSetup.value) {
-      showTravelerSetup.value = true
-      return
-    }
-
-    const profile = await auth.register(
-      email.value,
-      password.value,
-      username.value,
-      gender.value,
-      birthday.value,
-      travelerGender.value,
-      travelerIdentity.value,
-    )
-
-    traveler.createTraveler(profile?.travelerGender || travelerGender.value, profile?.travelerIdentity || travelerIdentity.value)
+    traveler.createTraveler(profile?.travelerGender || 'female', profile?.travelerIdentity || 'forest')
     await memory.loadUserData()
     router.push('/map')
   } catch (e) {
-    error.value = e.message || '账号处理失败，请稍后再试'
+    error.value = e.message || (mode.value === 'bind' ? '绑定失败，请稍后再试' : '登录失败，请稍后再试')
   } finally {
     loading.value = false
   }
@@ -81,67 +62,28 @@ async function submit() {
   <main class="page-pad auth-view">
     <div class="auth-card">
       <p class="eyebrow">TrailMemo</p>
-      <h1>{{ isLogin ? '登录山野手账' : showTravelerSetup ? '创建你的像素旅人' : '创建山野账号' }}</h1>
+      <h1>{{ mode === 'bind' ? '绑定账号保存进度' : '邮箱账号登录' }}</h1>
       <p class="subtitle">
-        {{ isLogin
-          ? '回到你的山野星球，继续点亮走过的路。'
-          : showTravelerSetup
-            ? `选择一位陪你探索山野的旅人：${selectedIdentity?.name || '森林新人'}`
-            : '用真实邮箱保存你的手账、地图点亮和成长记录。' }}
+        {{ mode === 'bind'
+          ? '游客进度会保留在当前身份里，绑定后换设备也能继续记录。'
+          : '登录已经绑定过的邮箱账号，找回你的地图和手账。' }}
       </p>
 
-      <div v-if="showTravelerSetup && !isLogin" class="traveler-setup">
+      <div class="traveler-setup compact-setup">
         <div class="traveler-preview">
           <PixelTraveler
             :gender="travelerGender"
             :identity="travelerIdentity"
-            :level="0"
-            :size="120"
+            :level="auth.profile?.level || 1"
+            :size="108"
           />
         </div>
-
-        <div class="traveler-gender-select">
-          <button
-            type="button"
-            :class="['gender-btn', { active: travelerGender === 'male' }]"
-            @click="travelerGender = 'male'"
-          >
-            <span>♂</span> 男生形象
-          </button>
-          <button
-            type="button"
-            :class="['gender-btn', { active: travelerGender === 'female' }]"
-            @click="travelerGender = 'female'"
-          >
-            <span>♀</span> 女生形象
-          </button>
-        </div>
-
-        <p class="setup-label">选择初始身份</p>
-        <div class="identity-grid">
-          <button
-            v-for="opt in identityOptions"
-            :key="opt.id"
-            type="button"
-            :class="['identity-btn', { active: travelerIdentity === opt.id }]"
-            @click="travelerIdentity = opt.id"
-          >
-            <span class="identity-icon">{{ opt.icon }}</span>
-            <span>
-              <strong>{{ opt.name }}</strong>
-              <small>{{ opt.desc }}</small>
-            </span>
-          </button>
-        </div>
-
-        <p v-if="error" class="auth-error">{{ error }}</p>
-
-        <button class="primary-action" type="button" :disabled="loading" @click="submit">
-          {{ loading ? '正在创建...' : '✦ 开始山野之旅' }}
-        </button>
+        <p class="setup-label account-status">
+          {{ auth.isAnonymous ? '游客模式' : '正式账号' }} · {{ displayName }}
+        </p>
       </div>
 
-      <form v-else class="auth-form" @submit.prevent="submit">
+      <form class="auth-form" @submit.prevent="submit">
         <label>
           邮箱
           <input v-model="email" type="email" placeholder="例如：you@qq.com" autocomplete="email" required />
@@ -153,46 +95,24 @@ async function submit() {
             v-model="password"
             type="password"
             placeholder="至少 6 位密码"
-            autocomplete="current-password"
+            :autocomplete="mode === 'bind' ? 'new-password' : 'current-password'"
             required
             minlength="6"
           />
         </label>
 
-        <template v-if="!isLogin">
-          <label>
-            旅人昵称
-            <input v-model="username" type="text" placeholder="比如：远山小记" maxlength="20" />
-          </label>
-
-          <div class="inline-fields">
-            <label>
-              性别
-              <select v-model="gender">
-                <option value="">选择</option>
-                <option value="男">男</option>
-                <option value="女">女</option>
-                <option value="其他">其他</option>
-              </select>
-            </label>
-            <label class="birthday-field">
-              生日
-              <input v-model="birthday" class="birthday-input" type="date" aria-label="生日" />
-            </label>
-          </div>
-        </template>
-
         <p v-if="error" class="auth-error">{{ error }}</p>
+        <p v-if="success" class="auth-success">{{ success }}</p>
 
         <button class="primary-action" type="submit" :disabled="loading">
-          {{ loading ? '处理中...' : isLogin ? '登录 ✦' : '下一步 ✦' }}
+          {{ loading ? '处理中...' : mode === 'bind' ? '绑定邮箱 ✦' : '登录 ✦' }}
         </button>
       </form>
 
       <p class="auth-toggle">
-        {{ isLogin ? '还没有账号？' : '已有账号？' }}
-        <button type="button" class="link-btn" @click="toggleMode">
-          {{ isLogin ? '去注册' : '去登录' }}
+        {{ mode === 'bind' ? '已经绑定过邮箱？' : '正在使用游客模式？' }}
+        <button type="button" class="link-btn" @click="switchMode(mode === 'bind' ? 'login' : 'bind')">
+          {{ mode === 'bind' ? '去登录' : '去绑定' }}
         </button>
       </p>
     </div>
@@ -284,6 +204,13 @@ async function submit() {
   color: #ef4444;
   font-size: 0.85rem;
   font-weight: 700;
+}
+
+.auth-success {
+  margin: 0;
+  color: #276749;
+  font-size: 0.85rem;
+  font-weight: 800;
 }
 
 .auth-form .primary-action {
@@ -408,4 +335,13 @@ async function submit() {
   font-weight: 800;
 }
 .identity-btn.active strong { color: #276749; }
+
+.compact-setup {
+  margin-bottom: 16px;
+}
+
+.account-status {
+  text-align: center;
+  color: #276749;
+}
 </style>
